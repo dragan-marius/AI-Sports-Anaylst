@@ -64,7 +64,3 @@ python manage.py runserver
 **Frontend**
 
 Simply open `index.html` in a browser once the Django server is running on `http://127.0.0.1:8000`. No build step required.
-
-## 📁 What's Not Included
-
-`app.py` in the repository root is an earlier Streamlit-based prototype, kept for historical reference — the logic it contained (LangChain tool + Gemini agent) was migrated into `api/views.py`. It is not part of the current Django/React architecture and is not required to run the app.
