@@ -1,3 +1,4 @@
 .env
 world_cup.db
 __pycache__/
+venv/
