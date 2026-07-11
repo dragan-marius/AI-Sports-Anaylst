@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Sports Analyst</title>
+    
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; padding: 2rem; color: #333; }
+        .container { background: white; padding: 2.5rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); max-width: 700px; width: 100%; text-align: center; }
+        .inputs { display: flex; gap: 10px; justify-content: center; margin: 20px 0; }
+        input { padding: 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; width: 100%; max-width: 200px; outline: none; }
+        input:focus { border-color: #646cff; }
+        button { padding: 12px 24px; background-color: #646cff; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; transition: 0.2s; font-weight: bold; }
+        button:hover { background-color: #535bf2; }
+        button:disabled { background-color: #a0a4f5; cursor: not-allowed; }
+        .result-box { margin-top: 30px; text-align: left; background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 5px solid #646cff; white-space: pre-wrap; line-height: 1.6; }
+    </style>
+</head>
+<body>
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        function App() {
+            // Fix logica ta din React
+            const [teamA, setTeamA] = React.useState('');
+            const [teamB, setTeamB] = React.useState('');
+            const [analysis, setAnalysis] = React.useState('');
+            const [loading, setLoading] = React.useState(false);
+
+            const getPrediction = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setAnalysis('');
+
+                try {
+                    // Cererea către "Ospătarul" Django
+                    const response = await axios.post('http://127.0.0.1:8000/api/predict/', {
+                        team_A: teamA,
+                        team_B: teamB
+                    });
+                    setAnalysis(response.data.ai_analysis);
+                } catch (error) {
+                    setAnalysis('A apărut o eroare. Asigură-te că serverul Django este pornit.');
+                    console.error(error);
+                }
+                
+                setLoading(false);
+            };
+
+            return (
+                <div className="container">
+                    <h1>AI Sports Analyst ⚽</h1>
+                    <p>Introdu două echipe în engleză pentru a obține analiza generată de agentul tău inteligent.</p>
+                    
+                    <form onSubmit={getPrediction}>
+                        <div className="inputs">
+                            <input type="text" placeholder="Gazde (ex: France)" value={teamA} onChange={(e) => setTeamA(e.target.value)} required />
+                            <input type="text" placeholder="Oaspeți (ex: Morocco)" value={teamB} onChange={(e) => setTeamB(e.target.value)} required />
+                        </div>
+                        <button type="submit" disabled={loading}>
+                            {loading ? 'Agentul AI scrie analiza...' : 'Generează Predicția'}
+                        </button>
+                    </form>
+
+                    {analysis && (
+                        <div className="result-box">
+                            <h2>Analiza Generată:</h2>
+                            <div>{analysis}</div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Pornim aplicația React pe ecran
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

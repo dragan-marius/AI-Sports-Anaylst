@@ -1,4 +1,6 @@
 .env
 world_cup.db
 __pycache__/
-venv/
+/venv
+db.sqlite3
+app.py 
