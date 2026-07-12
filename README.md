@@ -64,3 +64,15 @@ python manage.py runserver
 **Frontend**
 
 Simply open `index.html` in a browser once the Django server is running on `http://127.0.0.1:8000`. No build step required.
+
+## 🔭 Roadmap
+
+The current model relies solely on goals scored/conceded and match count. Planned improvements, in order of priority:
+
+- **Larger, multi-competition dataset**: Expand beyond the 2026 World Cup to include club-level matches and historical international fixtures, with separate attack/defense ratings per competition context (club vs. national team dynamics differ significantly).
+- **FIFA/UEFA ranking as a prior**: Incorporate official ranking points as an additional signal alongside the Poisson/Dixon-Coles ratings, calibrated via logistic regression against historical results.
+- **Player-level adjustments**: Factor in player market value and squad availability (injuries/suspensions) to adjust xG when key players are missing from the lineup.
+- **Richer statistical inputs**: Move beyond goals to include shot-based xG, possession, and other bookmaker-relevant stats, likely via a sports data API (e.g. API-Football, Understat).
+- **Ensemble scoring**: Combine the statistical model, ranking prior, and player-adjustment signals into a single calibrated model (possibly a lightweight ML ensemble, e.g. gradient boosting) rather than relying on Poisson alone.
+- **Frontend build pipeline**: Migrate from CDN-loaded React to a proper build setup (Vite) for maintainability.
+- **Deployment**: Containerize with Docker and set up basic CI/CD for reproducible deployment.
