@@ -73,6 +73,7 @@ def sync_new_matches():
 
         home_name_api = match['homeTeam']['name']
         away_name_api = match['awayTeam']['name']
+        match_date = match['utcDate']
 
         if 'fullTime' in match['score'] and match['score']['fullTime']['home'] is not None:
             home_goals = match['score']['fullTime']['home']
@@ -100,9 +101,9 @@ def sync_new_matches():
             continue
 
         cursor.execute(
-            """INSERT INTO Fixtures (home_team_id, away_team_id, home_goals, away_goals, status)
+            """INSERT INTO Fixtures (home_team_id, away_team_id, home_goals, away_goals, status, match_date)
                VALUES (?, ?, ?, ?, 'FT')""",
-            (home_id, away_id, home_goals, away_goals)
+            (home_id, away_id, home_goals, away_goals, match_date)
         )
         meciuri_adaugate += 1
         print(f"✅ Adăugat: {home_name_api} {home_goals} - {away_goals} {away_name_api}")

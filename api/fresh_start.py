@@ -1,6 +1,7 @@
 import requests
 import sqlite3
 import os 
+import unicodedata
 from dotenv import load_dotenv
 
 # Incarcam cheia API
@@ -9,7 +10,7 @@ API_KEY = os.getenv("API_KEY")
 URL = "http://api.football-data.org/v4/competitions/WC/matches"
 HEADERS = {"X-Auth-Token": API_KEY}
 
-# Lista perfecta a celor 48 de echipe + codurile oficiale FIFA
+# Lista perfecta a celor 48 de echipe
 teams_2026 = {
     "Algeria": "ALG", "Argentina": "ARG", "Australia": "AUS", "Austria": "AUT", 
     "Belgium": "BEL", "Bosnia and Herzegovina": "BIH", "Brazil": "BRA", "Canada": "CAN", 
@@ -24,6 +25,37 @@ teams_2026 = {
     "Spain": "ESP", "Sweden": "SWE", "Switzerland": "SUI", "Tunisia": "TUN", 
     "Turkiye": "TUR", "United States": "USA", "Uruguay": "URU", "Uzbekistan": "UZB"
 }
+
+# Aliasuri pentru API
+ALIASES = {
+    "korea republic": "South Korea",
+    "usa": "United States",
+    "ir iran": "Iran",
+    "cote d'ivoire": "Ivory Coast",
+    "dr congo": "Congo DR",
+    "congo democratic republic": "Congo DR",
+    "bosnia & herzegovina": "Bosnia and Herzegovina",
+    "cabo verde": "Cape Verde",
+    "bosnia-herzegovina": "Bosnia and Herzegovina",
+    "cape verde islands": "Cape Verde",
+    "turkey": "Turkiye",
+}
+
+def normalizeaza(nume):
+    nume = unicodedata.normalize('NFKD', nume)
+    nume = ''.join(c for c in nume if not unicodedata.combining(c))
+    return nume.lower().strip()
+
+def get_db_team_name(api_name):
+    norm = normalizeaza(api_name)
+    # Verifica in aliasuri
+    if norm in ALIASES.keys():
+        return ALIASES[norm]
+    # Verifica direct in lista ta (ignorand majusculele/diacriticele)
+    for db_name in teams_2026.keys():
+        if normalizeaza(db_name) == norm:
+            return db_name
+    return api_name
 
 def build_perfect_database():
     conn = sqlite3.connect('world_cup.db')
@@ -49,6 +81,7 @@ def build_perfect_database():
             home_goals INTEGER,
             away_goals INTEGER,
             status TEXT,
+            match_date TEXT,
             FOREIGN KEY (home_team_id) REFERENCES Teams (team_id),
             FOREIGN KEY (away_team_id) REFERENCES Teams (team_id)
         )
@@ -68,13 +101,16 @@ def build_perfect_database():
         
     matches_data = response.json().get('matches', [])
     meciuri = 0
+    meciuri_ratate = set()
     
     for match in matches_data:
         if match['status'] == 'FINISHED':
-            home_team = match['homeTeam']['name']
-            away_team = match['awayTeam']['name']
+            # Mapăm numele de la API la numele din baza ta de date
+            home_team = get_db_team_name(match['homeTeam']['name'])
+            away_team = get_db_team_name(match['awayTeam']['name'])
+            match_date = match['utcDate']
             
-            if 'fullTime' in match['score']:
+            if 'fullTime' in match['score'] and match['score']['fullTime']['home'] is not None:
                 home_goals = match['score']['fullTime']['home']
                 away_goals = match['score']['fullTime']['away']
             else:
@@ -88,16 +124,22 @@ def build_perfect_database():
             
             if h_res and a_res:
                 cursor.execute("""
-                    INSERT INTO Fixtures (home_team_id, away_team_id, home_goals, away_goals, status)
-                    VALUES (?, ?, ?, ?, 'FT')
-                """, (h_res[0], a_res[0], home_goals, away_goals))
+                    INSERT INTO Fixtures (home_team_id, away_team_id, home_goals, away_goals, status, match_date)
+                    VALUES (?, ?, ?, ?, 'FT', ?)
+                """, (h_res[0], a_res[0], home_goals, away_goals, match_date))
                 meciuri += 1
+            else:
+                if not h_res: meciuri_ratate.add(match['homeTeam']['name'])
+                if not a_res: meciuri_ratate.add(match['awayTeam']['name'])
                 
     conn.commit()
     conn.close()
     
     print(f"\n✅ GATA! Baza ta de date este acum impecabilă!")
-    print(f"Conține exact 48 de echipe și {meciuri} meciuri.")
+    print(f"Conține exact 48 de echipe și {meciuri} meciuri (cu tot cu data calendaristică).")
+    
+    if meciuri_ratate:
+        print(f"⚠️ Atenție, echipe ignorate (verifică ALIASES): {meciuri_ratate}")
 
 if __name__ == "__main__":
     build_perfect_database()
