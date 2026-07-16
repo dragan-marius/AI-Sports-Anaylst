@@ -82,6 +82,7 @@ def build_perfect_database():
             away_goals INTEGER,
             status TEXT,
             match_date TEXT,
+            stage TEXT, -- <--- NOU: Am adăugat coloana stage
             FOREIGN KEY (home_team_id) REFERENCES Teams (team_id),
             FOREIGN KEY (away_team_id) REFERENCES Teams (team_id)
         )
@@ -104,42 +105,51 @@ def build_perfect_database():
     meciuri_ratate = set()
     
     for match in matches_data:
-        if match['status'] == 'FINISHED':
-            # Mapăm numele de la API la numele din baza ta de date
-            home_team = get_db_team_name(match['homeTeam']['name'])
-            away_team = get_db_team_name(match['awayTeam']['name'])
-            match_date = match['utcDate']
-            
+        # ⬇️ Am scos restrictia "if match['status'] == 'FINISHED':"
+        home_team = get_db_team_name(match['homeTeam']['name'])
+        away_team = get_db_team_name(match['awayTeam']['name'])
+        match_date = match['utcDate']
+        
+        # Extragem Faza (Stage) cu o valoare default
+        match_stage = match.get('stage', 'REGULAR')
+        api_status = match['status']
+        
+        # Gestionăm golurile în funcție de statusul meciului
+        home_goals = None
+        away_goals = None
+        db_status = 'NS' # Not Started (implicit)
+        
+        if api_status in ['FINISHED', 'IN_PLAY', 'PAUSED']:
+            db_status = 'FT'
             if 'fullTime' in match['score'] and match['score']['fullTime']['home'] is not None:
                 home_goals = match['score']['fullTime']['home']
                 away_goals = match['score']['fullTime']['away']
-            else:
+            elif 'regularTime' in match['score'] and match['score']['regularTime']['home'] is not None:
                 home_goals = match['score']['regularTime']['home']
                 away_goals = match['score']['regularTime']['away']
-            
-            cursor.execute("SELECT team_id FROM Teams WHERE name = ?", (home_team,))
-            h_res = cursor.fetchone()
-            cursor.execute("SELECT team_id FROM Teams WHERE name = ?", (away_team,))
-            a_res = cursor.fetchone()
-            
-            if h_res and a_res:
-                cursor.execute("""
-                    INSERT INTO Fixtures (home_team_id, away_team_id, home_goals, away_goals, status, match_date)
-                    VALUES (?, ?, ?, ?, 'FT', ?)
-                """, (h_res[0], a_res[0], home_goals, away_goals, match_date))
-                meciuri += 1
-            else:
-                if not h_res: meciuri_ratate.add(match['homeTeam']['name'])
-                if not a_res: meciuri_ratate.add(match['awayTeam']['name'])
+        
+        cursor.execute("SELECT team_id FROM Teams WHERE name = ?", (home_team,))
+        h_res = cursor.fetchone()
+        cursor.execute("SELECT team_id FROM Teams WHERE name = ?", (away_team,))
+        a_res = cursor.fetchone()
+        
+        if h_res and a_res:
+            cursor.execute("""
+                INSERT INTO Fixtures (home_team_id, away_team_id, home_goals, away_goals, status, match_date, stage)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (h_res[0], a_res[0], home_goals, away_goals, db_status, match_date, match_stage))
+            meciuri += 1
+        else:
+            if not h_res: meciuri_ratate.add(match['homeTeam']['name'])
+            if not a_res: meciuri_ratate.add(match['awayTeam']['name'])
                 
     conn.commit()
     conn.close()
     
     print(f"\n✅ GATA! Baza ta de date este acum impecabilă!")
-    print(f"Conține exact 48 de echipe și {meciuri} meciuri (cu tot cu data calendaristică).")
+    print(f"Conține exact 48 de echipe și {meciuri} meciuri (viitoare și trecute, cu faza competiției!).")
     
     if meciuri_ratate:
         print(f"⚠️ Atenție, echipe ignorate (verifică ALIASES): {meciuri_ratate}")
-
 if __name__ == "__main__":
     build_perfect_database()

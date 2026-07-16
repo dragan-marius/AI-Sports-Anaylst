@@ -23,19 +23,21 @@ def calculate_team_stats(cursor, team_name, target_date=None):
         return None
     team_id = result[0]
     
-    # Alegem query-ul corect în funcție de prezența datei
+    # Am adăugat coloana 'stage' în SELECT
     if target_date:
-        query = '''SELECT home_goals, away_goals, home_team_id 
+        query = '''SELECT home_goals, away_goals, home_team_id, stage 
                    FROM Fixtures 
                    WHERE (home_team_id= ? OR away_team_id = ?) 
                    AND status IN ('FT', 'AET', 'PEN') 
-                   AND match_date < ?'''
+                   AND match_date < ?
+                   ORDER BY match_date DESC LIMIT 5'''
         cursor.execute(query, (team_id, team_id, target_date))
     else:
-        query = '''SELECT home_goals, away_goals, home_team_id 
+        query = '''SELECT home_goals, away_goals, home_team_id, stage 
                    FROM Fixtures 
                    WHERE (home_team_id= ? OR away_team_id = ?) 
-                   AND status IN ('FT', 'AET', 'PEN')'''
+                   AND status IN ('FT', 'AET', 'PEN')
+                   ORDER BY match_date DESC LIMIT 5'''
         cursor.execute(query, (team_id, team_id))
         
     matches = cursor.fetchall()
@@ -45,14 +47,31 @@ def calculate_team_stats(cursor, team_name, target_date=None):
         
     goals_scored = 0
     goals_conceded = 0
+    
     for match in matches:
-        home_goals, away_goals, home_team_id = match
-        if home_team_id == team_id:
-            goals_scored += min(home_goals, 3)
-            goals_conceded += min(away_goals, 3)
+        home_goals, away_goals, home_team_id, stage = match
+        
+        # --- LOGICA DE NORMALIZARE ISTORICĂ ---
+        if stage == 'THIRD_PLACE':
+            factor = 1.35
+        elif stage == 'FINAL':
+            factor = 0.90
+        elif stage in ['LAST_16', 'QUARTER_FINALS', 'SEMI_FINALS']:
+            factor = 0.95
         else:
-            goals_scored += min(away_goals, 3)
-            goals_conceded += min(home_goals, 3)
+            factor = 1.0 # GROUP_STAGE sau altele
+            
+        # „Dezumflăm” sau „umflăm” golurile brute pe baza dificultății
+        norm_home_goals = home_goals / factor
+        norm_away_goals = away_goals / factor
+
+        if home_team_id == team_id:
+            # Păstrăm limita de max 3 goluri luate în calcul, dar aplicată pe valoarea normalizată
+            goals_scored += min(norm_home_goals, 3)
+            goals_conceded += min(norm_away_goals, 3)
+        else:
+            goals_scored += min(norm_away_goals, 3)
+            goals_conceded += min(norm_home_goals, 3)
             
     return {
         "matches_played": len(matches),
@@ -63,56 +82,98 @@ def calculate_team_stats(cursor, team_name, target_date=None):
 def poisson_probability(lmbda, k):
     return (math.pow(lmbda, k) * math.exp(-lmbda)) / math.factorial(k)
 
-def predict_match(team_A, team_B, match_date=None):
+def predict_match(team_A, team_B, match_date=None, comp_type="World Cup"):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Media turneului trebuie să respecte și ea data (dacă există)
+    # 1. Obținem ID-urile echipelor
+    cursor.execute("SELECT team_id FROM Teams WHERE name = ?", (team_A,))
+    res_A = cursor.fetchone()
+    cursor.execute("SELECT team_id FROM Teams WHERE name = ?", (team_B,))
+    res_B = cursor.fetchone()
+    
+    if not res_A or not res_B:
+        conn.close()
+        return f"Eroare: Nu am putut găsi echipele '{team_A}' sau '{team_B}' în baza de date."
+        
+    tA_id, tB_id = res_A[0], res_B[0]
+    
+    # --- AUTO-DETECȚIE FAZĂ MECI (STAGE) ---
+    # Căutăm meciul direct în baza de date (fie la data cerută pentru backtesting, fie meciul viitor 'NS')
+    if match_date:
+        cursor.execute('''SELECT stage FROM Fixtures 
+                          WHERE ((home_team_id = ? AND away_team_id = ?) OR (home_team_id = ? AND away_team_id = ?))
+                          AND match_date = ? LIMIT 1''', (tA_id, tB_id, tB_id, tA_id, match_date))
+    else:
+        cursor.execute('''SELECT stage FROM Fixtures 
+                          WHERE ((home_team_id = ? AND away_team_id = ?) OR (home_team_id = ? AND away_team_id = ?))
+                          AND status = 'NS' LIMIT 1''', (tA_id, tB_id, tB_id, tA_id))
+    
+    stage_result = cursor.fetchone()
+    match_stage = stage_result[0] if stage_result else 'REGULAR'
+
+    # --- CALCUL MEDIA TURNEULUI ---
     if match_date:
         cursor.execute("SELECT AVG(home_goals + away_goals) / 2 FROM Fixtures WHERE status IN ('FT', 'AET', 'PEN') AND match_date < ?", (match_date,))
     else:
         cursor.execute("SELECT AVG(home_goals + away_goals) / 2 FROM Fixtures WHERE status IN ('FT', 'AET', 'PEN')")
         
     result_avg = cursor.fetchone()[0]
-    tournament_avg_goals = result_avg if result_avg is not None else 1.0 # fallback în caz că baza e goală
+    tournament_avg_goals = result_avg if result_avg is not None else 1.0
     
-    # Transmitem data mai departe către calculul echipelor
+    # --- CALCUL STATISTICI ECHIPE (CU NORMALIZARE) ---
     stats_A = calculate_team_stats(cursor, team_A, target_date=match_date)
     stats_B = calculate_team_stats(cursor, team_B, target_date=match_date)
     
     if not stats_A or not stats_B:
         conn.close()
-        return f"Eroare: Nu am putut găsi echipele '{team_A}' sau '{team_B}' în baza de date cu meciuri jucate până la acea dată."
+        return f"Eroare: Lipsesc meciurile anterioare pentru {team_A} sau {team_B}."
     
     pondere_medie = 3.0
-    # Netezim mediile de atac si aparare
     medie_atac_A = (stats_A['average_scored'] * stats_A['matches_played'] + tournament_avg_goals * pondere_medie) / (stats_A['matches_played'] + pondere_medie)
     medie_aparare_B = (stats_B['average_conceded'] * stats_B['matches_played'] + tournament_avg_goals * pondere_medie) / (stats_B['matches_played'] + pondere_medie)
     
     medie_atac_B = (stats_B['average_scored'] * stats_B['matches_played'] + tournament_avg_goals * pondere_medie) / (stats_B['matches_played'] + pondere_medie)
     medie_aparare_A = (stats_A['average_conceded'] * stats_A['matches_played'] + tournament_avg_goals * pondere_medie) / (stats_A['matches_played'] + pondere_medie)
 
-    # Calculam forta relativa fata de media turneului
     attack_A = medie_atac_A / tournament_avg_goals
     defense_B = medie_aparare_B / tournament_avg_goals
     attack_B = medie_atac_B / tournament_avg_goals
     defense_A = medie_aparare_A / tournament_avg_goals
 
+    # --- CITIRE ELO ---
+    cursor.execute("SELECT elo_rating FROM Teams WHERE team_id = ?", (tA_id,))
+    elo_A = cursor.fetchone()[0]
+    cursor.execute("SELECT elo_rating FROM Teams WHERE team_id = ?", (tB_id,))
+    elo_B = cursor.fetchone()[0]
+
+    elo_diff = elo_A - elo_B
+    elo_factor = pow(10, elo_diff / 8000)
+
+    attack_A *= elo_factor
+    attack_B /= elo_factor
+    
     xg_A_initial = attack_A * defense_B * tournament_avg_goals
     xg_B_initial = attack_B * defense_A * tournament_avg_goals
-    # target_total = 2.65 
-    # expected_total_goals = xg_A_initial + xg_B_initial
-    # if expected_total_goals > target_total:
-    #     scale_factor = target_total / expected_total_goals
-    #     xg_A = xg_A_initial * scale_factor
-    #     xg_B = xg_B_initial * scale_factor
-    # else:
-    xg_A = xg_A_initial
-    xg_B = xg_B_initial
-    
-    xg_A = max(0.4, min(xg_A, 3))
-    xg_B = max(0.4, min(xg_B, 3))
 
+    # --- APLICAREA MULTIPLICATORULUI DE CONTEXT (PENTRU MECIUL ACTUAL) ---
+    if comp_type == "Friendly":
+        xg_A_initial *= 1.25
+        xg_B_initial *= 1.25
+    
+    if match_stage == 'THIRD_PLACE':
+        xg_A_initial *= 1.35
+        xg_B_initial *= 1.35
+    elif match_stage == 'FINAL':
+        xg_A_initial *= 0.90
+        xg_B_initial *= 0.90
+    elif match_stage in ['LAST_16', 'QUARTER_FINALS', 'SEMI_FINALS']:
+        xg_A_initial *= 0.95
+        xg_B_initial *= 0.95
+
+    # Clamp
+    xg_A = max(0.4, min(xg_A_initial, 3))
+    xg_B = max(0.4, min(xg_B_initial, 3))
 
     prob_A_wins = 0
     prob_B_wins = 0
@@ -155,39 +216,40 @@ def predict_match(team_A, team_B, match_date=None):
         under = 1 / max(prob_under[i], 0.001)
         over = 1 / max(prob_over[i], 0.001)
         rez += f"Sub {i}.5: {under:.2f} | Peste {i}.5: {over:.2f}\n"
-
     return rez
 
 if __name__ == "__main__":
-    print("========================================")
-    print("      TESTARE SFERTURI DE FINALĂ        ")
-    print("========================================\n")
+    # print("========================================")
+    # print("      TESTARE SFERTURI DE FINALĂ        ")
+    # print("========================================\n")
     
-    # 1. Franța - Maroc (Flashscore: 09.07 23:00 / UTC Start: 20:00)
-    print(">>> FRANȚA vs MAROC")
-    print(predict_match("France", "Morocco", "2026-07-09T18:00:00Z"))
+    # # 1. Franța - Maroc (Flashscore: 09.07 23:00 / UTC Start: 20:00)
+    # print(">>> FRANȚA vs MAROC")
+    # print(predict_match("France", "Morocco", "2026-07-09T18:00:00Z"))
     
-    # 2. Spania - Belgia (Flashscore: 10.07 22:00 / UTC Start: 19:00)
-    print(">>> SPANIA vs BELGIA")
-    print(predict_match("Spain", "Belgium", "2026-07-10T17:00:00Z"))
+    # # 2. Spania - Belgia (Flashscore: 10.07 22:00 / UTC Start: 19:00)
+    # print(">>> SPANIA vs BELGIA")
+    # print(predict_match("Spain", "Belgium", "2026-07-10T17:00:00Z"))
     
-    # 3. Norvegia - Anglia (Flashscore: 12.07 00:00 / UTC Start: 11.07 21:00)
-    print(">>> NORVEGIA vs ANGLIA")
-    print(predict_match("Norway", "England", "2026-07-11T19:00:00Z"))
+    # # 3. Norvegia - Anglia (Flashscore: 12.07 00:00 / UTC Start: 11.07 21:00)
+    # print(">>> NORVEGIA vs ANGLIA")
+    # print(predict_match("Norway", "England", "2026-07-11T19:00:00Z"))
     
-    # 4. Argentina - Elveția (Flashscore: 12.07 04:00 / UTC Start: 12.07 01:00)
-    print(">>> ARGENTINA vs ELVEȚIA")
-    print(predict_match("Argentina", "Switzerland", "2026-07-11T23:00:00Z"))
+    # # 4. Argentina - Elveția (Flashscore: 12.07 04:00 / UTC Start: 12.07 01:00)
+    # print(">>> ARGENTINA vs ELVEȚIA")
+    # print(predict_match("Argentina", "Switzerland", "2026-07-11T23:00:00Z"))
     
 
-    print("\n========================================")
-    print("           TESTARE SEMIFINALE           ")
-    print("========================================\n")
+    # print("\n========================================")
+    # print("           TESTARE SEMIFINALE           ")
+    # print("========================================\n")
     
-    # 5. Franța - Spania (Flashscore: 14.07 22:00 / UTC Start: 19:00)
-    print(">>> FRANȚA vs SPANIA")
-    print(predict_match("France", "Spain", "2026-07-14T17:00:00Z"))
+    # # 5. Franța - Spania (Flashscore: 14.07 22:00 / UTC Start: 19:00)
+    # print(">>> FRANȚA vs SPANIA")
+    # print(predict_match("France", "Spain", "2026-07-14T17:00:00Z"))
     
-    # 6. Anglia - Argentina (Flashscore: 15.07 22:00 / UTC Start: 19:00)
-    print(">>> ANGLIA vs ARGENTINA")
-    print(predict_match("England", "Argentina", "2026-07-15T17:00:00Z"))
+    # # 6. Anglia - Argentina (Flashscore: 15.07 22:00 / UTC Start: 19:00)
+    # print(">>> ANGLIA vs ARGENTINA")
+    # print(predict_match("England", "Argentina", "2026-07-15T17:00:00Z"))
+    #print(predict_match("Spain", "Argentina"))
+    print(predict_match("France", "England"))
