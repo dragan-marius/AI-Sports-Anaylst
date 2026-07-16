@@ -4,25 +4,23 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .predictor import predict_match
 
-# Importurile tale pentru LangChain și Gemini
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.tools import tool
 from langchain.agents import create_agent
 
-# Încărcăm cheia API
 load_dotenv()
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
-# 1. Definim unealta pentru AI (exact ca în app.py)
+# 1. Actualizăm unealta ca să accepte noii parametri
 @tool
-def predict_math_prompt(team_A: str, team_B: str) -> str:
+def predict_math_prompt(team_A: str, team_B: str, comp_type: str = "World Cup", manual_stage: str = "Auto") -> str:
     """
     Folosește această unealtă OBLIGATORIU când utilizatorul cere o predicție pentru un meci.
-    Input-ul trebuie să fie numele echipelor în engleză. Returnează cotele calculate.
+    Input-ul trebuie să fie numele echipelor în engleză. Parametrii comp_type și manual_stage 
+    trebuie trimiși exact așa cum ți-au fost ceruți.
     """
-    return predict_match(team_A, team_B)
+    return predict_match(team_A, team_B, comp_type=comp_type, manual_stage=manual_stage)
 
-# 2. Configurăm Agentul la nivel global (ca să nu îl reinițializăm la fiecare request)
 SYSTEM_PROMPT = """
 Ești un Expert în Data Science și Analist Sportiv Predictiv. Când un utilizator îți cere o predicție:
 1. Folosește OBLIGATORIU unealta 'predict_math_prompt' pentru a obține cotele și xG-ul.
@@ -46,27 +44,30 @@ agent = create_agent(
     system_prompt=SYSTEM_PROMPT
 )
 
-# 3. Endpoint-ul care primește cererea de la React
 @api_view(['POST'])
 def get_prediction(request):
     team_a = request.data.get('team_A')
     team_b = request.data.get('team_B')
+    
+    # 2. Extragem datele din Simulator (dacă utilizatorul a selectat ceva)
+    comp_type = request.data.get('comp_type', 'World Cup')
+    manual_stage = request.data.get('manual_stage', 'Auto')
 
     if not team_a or not team_b:
         return Response({'error': 'Te rog să introduci ambele echipe.'}, status=400)
 
     try:
-        # 4. Creăm promptul și chemăm inteligența artificială
-        user_prompt = f"Fă-mi o predicție completă pentru meciul {team_a} vs {team_b}"
-        
+        # 3. Construim promptul pentru Gemini, spunându-i să folosească setările primite
+        user_prompt = f"Fă-mi o predicție completă pentru meciul {team_a} vs {team_b}. "
+        if manual_stage != "Auto" or comp_type != "World Cup":
+            user_prompt += f"Folosește setările manuale OBLIGATORII pentru unealta ta: comp_type='{comp_type}', manual_stage='{manual_stage}'."
+
         response = agent.invoke({"messages": [{"role": "user", "content": user_prompt}]})
         
-        # Extragem răspunsul curat (exact logica ta de formatare)
         final_answer = response["messages"][-1].content
         if isinstance(final_answer, list):
             final_answer = "".join([str(item.get("text", item)) if isinstance(item, dict) else str(item) for item in final_answer])
         
-        # 5. Returnăm și textul generat de AI, și echipele
         return Response({
             'team_A': team_a,
             'team_B': team_b,

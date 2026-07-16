@@ -14,8 +14,8 @@
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; padding: 2rem; color: #333; }
         .container { background: white; padding: 2.5rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); max-width: 700px; width: 100%; text-align: center; }
         .inputs { display: flex; gap: 10px; justify-content: center; margin: 20px 0; }
-        input { padding: 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; width: 100%; max-width: 200px; outline: none; }
-        input:focus { border-color: #646cff; }
+        input, select { padding: 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; width: 100%; max-width: 200px; outline: none; }
+        input:focus, select:focus { border-color: #646cff; }
         button { padding: 12px 24px; background-color: #646cff; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; transition: 0.2s; font-weight: bold; }
         button:hover { background-color: #535bf2; }
         button:disabled { background-color: #a0a4f5; cursor: not-allowed; }
@@ -28,9 +28,14 @@
 
     <script type="text/babel">
         function App() {
-            // Fix logica ta din React
+            // State-urile originale
             const [teamA, setTeamA] = React.useState('');
             const [teamB, setTeamB] = React.useState('');
+            
+            // State-urile NOI pentru Simulator
+            const [compType, setCompType] = React.useState('World Cup');
+            const [manualStage, setManualStage] = React.useState('Auto');
+            
             const [analysis, setAnalysis] = React.useState('');
             const [loading, setLoading] = React.useState(false);
 
@@ -40,10 +45,12 @@
                 setAnalysis('');
 
                 try {
-                    // Cererea către "Ospătarul" Django
+                    // Trimitem TOTUL către Django (Echipele + Setările din Simulator)
                     const response = await axios.post('http://127.0.0.1:8000/api/predict/', {
                         team_A: teamA,
-                        team_B: teamB
+                        team_B: teamB,
+                        comp_type: compType,
+                        manual_stage: manualStage
                     });
                     setAnalysis(response.data.ai_analysis);
                 } catch (error) {
@@ -60,10 +67,31 @@
                     <p>Introdu două echipe în engleză pentru a obține analiza generată de agentul tău inteligent.</p>
                     
                     <form onSubmit={getPrediction}>
+                        {/* Secțiunea Echipelor */}
                         <div className="inputs">
                             <input type="text" placeholder="Gazde (ex: France)" value={teamA} onChange={(e) => setTeamA(e.target.value)} required />
                             <input type="text" placeholder="Oaspeți (ex: Morocco)" value={teamB} onChange={(e) => setTeamB(e.target.value)} required />
                         </div>
+
+                        {/* Secțiunea Simulatorului (Meniurile Derulante) */}
+                        <div className="inputs" style={{ marginTop: '0px' }}>
+                            <select value={compType} onChange={(e) => setCompType(e.target.value)}>
+                                <option value="World Cup">Campionat Mondial</option>
+                                <option value="Euro">Campionat European</option>
+                                <option value="Friendly">Meci Amical</option>
+                            </select>
+
+                            <select value={manualStage} onChange={(e) => setManualStage(e.target.value)}>
+                                <option value="Auto">Auto-detecție (Recomandat)</option>
+                                <option value="GROUP_STAGE">Faza Grupelor</option>
+                                <option value="LAST_16">Optimi de finală</option>
+                                <option value="QUARTER_FINALS">Sferturi de finală</option>
+                                <option value="SEMI_FINALS">Semifinale</option>
+                                <option value="THIRD_PLACE">Finala Mică</option>
+                                <option value="FINAL">Finala Mare</option>
+                            </select>
+                        </div>
+
                         <button type="submit" disabled={loading}>
                             {loading ? 'Agentul AI scrie analiza...' : 'Generează Predicția'}
                         </button>
@@ -79,7 +107,6 @@
             );
         }
 
-        // Pornim aplicația React pe ecran
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>

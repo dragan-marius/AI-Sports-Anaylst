@@ -82,7 +82,7 @@ def calculate_team_stats(cursor, team_name, target_date=None):
 def poisson_probability(lmbda, k):
     return (math.pow(lmbda, k) * math.exp(-lmbda)) / math.factorial(k)
 
-def predict_match(team_A, team_B, match_date=None, comp_type="World Cup"):
+def predict_match(team_A, team_B, match_date=None, comp_type="World Cup",manual_stage=None):
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -100,17 +100,20 @@ def predict_match(team_A, team_B, match_date=None, comp_type="World Cup"):
     
     # --- AUTO-DETECȚIE FAZĂ MECI (STAGE) ---
     # Căutăm meciul direct în baza de date (fie la data cerută pentru backtesting, fie meciul viitor 'NS')
-    if match_date:
-        cursor.execute('''SELECT stage FROM Fixtures 
+    if manual_stage and manual_stage != "Auto":
+        match_stage = manual_stage
+    else:
+        if match_date:
+            cursor.execute('''SELECT stage FROM Fixtures 
                           WHERE ((home_team_id = ? AND away_team_id = ?) OR (home_team_id = ? AND away_team_id = ?))
                           AND match_date = ? LIMIT 1''', (tA_id, tB_id, tB_id, tA_id, match_date))
-    else:
-        cursor.execute('''SELECT stage FROM Fixtures 
+        else:
+            cursor.execute('''SELECT stage FROM Fixtures 
                           WHERE ((home_team_id = ? AND away_team_id = ?) OR (home_team_id = ? AND away_team_id = ?))
                           AND status = 'NS' LIMIT 1''', (tA_id, tB_id, tB_id, tA_id))
     
-    stage_result = cursor.fetchone()
-    match_stage = stage_result[0] if stage_result else 'REGULAR'
+        stage_result = cursor.fetchone()
+        match_stage = stage_result[0] if stage_result else 'REGULAR'
 
     # --- CALCUL MEDIA TURNEULUI ---
     if match_date:
