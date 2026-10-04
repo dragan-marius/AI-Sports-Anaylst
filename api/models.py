@@ -99,3 +99,18 @@ class Match(models.Model):
 
     def __str__(self):
         return f"{self.home_team} - {self.away_team}"
+
+class TeamElo(models.Model):
+    team = models.ForeignKey(
+        Team,
+        on_delete=models.CASCADE,
+        related_name="elo_ratings"
+    )
+    date = models.DateField()
+    elo = models.FloatField()
+
+    class Meta:
+        unique_together = ("team", "date")
+
+    def __str__(self):
+        return f"{self.team.name} - {self.date}: {self.elo}"

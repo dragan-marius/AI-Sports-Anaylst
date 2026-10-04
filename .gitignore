@@ -4,3 +4,6 @@ __pycache__/
 db.sqlite3
 app.py
 /World Football Elo Ratings_files
+
+# External Elo dataset
+/data/EloRatings.csv
