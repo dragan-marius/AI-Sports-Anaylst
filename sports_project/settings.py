@@ -79,7 +79,7 @@ WSGI_APPLICATION = 'sports_project.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'world_cup.db',
+        'NAME': BASE_DIR / 'club_football.db',
     }
 }
 
